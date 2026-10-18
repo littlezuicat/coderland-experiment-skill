@@ -28,6 +28,7 @@ BUU_BASE = "https://buu-download.code.zuicat.cn"
 API_PREFIX = "/api/v1/experiments"
 MAX_CHUNK_BYTES = 8 * 1024 * 1024
 MAX_ARCHIVE_UNPACKED = 3 * 1024 * 1024 * 1024
+MAX_PAPER_PDF_BYTES = 50 * 1024 * 1024
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 MASK_EXTENSIONS = {".png", ".bmp", ".tif", ".tiff"}
 
@@ -43,6 +44,31 @@ class _TrustedRedirectHandler(urllib.request.HTTPRedirectHandler):
         if new.scheme != "https" or new.hostname != old.hostname or new.port != old.port:
             raise urllib.error.URLError("拒绝把 API 请求或凭据重定向到其他主机。")
         return super().redirect_request(request, file_pointer, code, message, headers, new_url)
+
+
+class _TrustedDownloadRedirectHandler(_TrustedRedirectHandler):
+    """Allow CoderLand's documented Drive redirects without forwarding API credentials."""
+
+    _GOOGLE_DOWNLOAD_HOSTS = {"drive.google.com", "drive.usercontent.google.com"}
+    _GOOGLE_DOWNLOAD_PATHS = {"/uc", "/download"}
+
+    def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+        old = urllib.parse.urlsplit(request.full_url)
+        new = urllib.parse.urlsplit(new_url)
+        if new.scheme == "https" and new.hostname == old.hostname and new.port == old.port:
+            return super().redirect_request(request, file_pointer, code, message, headers, new_url)
+        if (request.get_method().upper() != "GET" or new.scheme != "https"
+                or (new.hostname or "").lower() not in self._GOOGLE_DOWNLOAD_HOSTS
+                or new.path not in self._GOOGLE_DOWNLOAD_PATHS or new.port not in (None, 443)):
+            raise urllib.error.URLError("拒绝跟随非预期的外部下载重定向。")
+        redirected = urllib.request.HTTPRedirectHandler.redirect_request(
+            self, request, file_pointer, code, message, headers, new_url,
+        )
+        if redirected is not None:
+            for header_name in (*redirected.headers, *redirected.unredirected_hdrs):
+                if header_name.casefold() == "x-api-key":
+                    redirected.remove_header(header_name)
+        return redirected
 
 
 def credentials_path() -> Path:
@@ -150,6 +176,78 @@ def _request_json(method: str, path: str, *, base: str | None = None,
         raise CoderLandError("服务器返回了非对象 JSON。")
     return result
 
+
+def _request_to_file(method: str, path: str, destination: Path, *, base: str | None = None,
+                     api_key: str | None = None, body: object | None = None,
+                     headers: dict[str, str] | None = None, timeout: int = 3600) -> tuple[int, dict[str, str]]:
+    base_url = (base or API_BASE).rstrip("/")
+    if base_url not in {API_BASE, BUU_BASE} and not re.match(r"^http://(127\.0\.0\.1|localhost)(:\d+)?$", base_url):
+        raise CoderLandError("Skill 只连接固定的码境 API 或 BUU 上传主机。")
+    if not path.startswith("/"):
+        raise CoderLandError("API 路径必须以 / 开头。")
+    request_headers = {"Accept": "application/json", "User-Agent": "CoderLand-Experiment-Skill/1.0.0"}
+    if api_key:
+        request_headers["X-API-Key"] = api_key
+    data = None
+    if body is not None:
+        data = _json_bytes(body)
+        request_headers["Content-Type"] = "application/json; charset=utf-8"
+    if headers:
+        request_headers.update(headers)
+    request = urllib.request.Request(base_url + path, data=data, headers=request_headers, method=method.upper())
+    destination = destination.expanduser().resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.part")
+    written = 0
+    try:
+        opener = urllib.request.build_opener(_TrustedDownloadRedirectHandler())
+        with opener.open(request, timeout=timeout) as response:
+            response_headers = dict(response.headers.items())
+            raw_length = response.headers.get("Content-Length", "")
+            try:
+                expected = int(raw_length)
+                if expected < 0:
+                    expected = None
+            except (TypeError, ValueError):
+                expected = None
+            with temporary.open("xb") as output:
+                if os.name != "nt":
+                    os.chmod(temporary, 0o600)
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    written += len(chunk)
+                    if expected:
+                        print(f"下載中：{written * 100 // expected}% ({written}/{expected} bytes)", file=sys.stderr, flush=True)
+                    else:
+                        print(f"下載中：{written} bytes（服务器未提供文件总大小）", file=sys.stderr, flush=True)
+                output.flush()
+                os.fsync(output.fileno())
+            if expected is not None and written != expected:
+                raise CoderLandError(f"下载未完成：收到 {written} / {expected} bytes，原文件保持不变。")
+        os.replace(temporary, destination)
+        return written, response_headers
+    except urllib.error.HTTPError as exc:
+        response_body = exc.read(64 * 1024)
+        try:
+            detail = json.loads(response_body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            detail = {"error": response_body[:500].decode("utf-8", "replace") or str(exc)}
+        code = str(detail.get("code") or "") if isinstance(detail, dict) else ""
+        message = str(detail.get("error") or f"HTTP {exc.code}") if isinstance(detail, dict) else f"HTTP {exc.code}"
+        if code == "BUU_NETWORK_REQUIRED":
+            message = "请连接 BUU 后重试；未完成本次文件传输。"
+        raise CoderLandError(f"{message} [{code or exc.code}]") from exc
+    except (urllib.error.URLError, TimeoutError, http.client.HTTPException) as exc:
+        raise CoderLandError(f"连接码境 API 失败：{exc}") from exc
+    except OSError as exc:
+        raise CoderLandError(f"无法保存下载文件：{exc}") from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def _request_file(method: str, path: str, file_path: Path, *, base: str,
                   api_key: str, content_type: str, timeout: int = 3600) -> tuple[bytes, dict[str, str]]:
     base_url = base.rstrip("/")
@@ -255,7 +353,18 @@ def api_path(path: str) -> str:
         if parsed.query:
             path += "?" + parsed.query
     parsed_path = urllib.parse.urlsplit(path).path
-    decoded_path = urllib.parse.unquote(parsed_path)
+    decoded_path = parsed_path
+    for _ in range(8):
+        if "\\" in decoded_path or any(segment in {".", ".."} for segment in decoded_path.split("/")):
+            raise CoderLandError("API 路径包含不安全的路径片段。")
+        if re.search(r"%(?:2f|5c)", decoded_path, re.IGNORECASE):
+            raise CoderLandError("API 路径不能包含编码后的路径分隔符。")
+        unquoted = urllib.parse.unquote(decoded_path)
+        if unquoted == decoded_path:
+            break
+        decoded_path = unquoted
+    else:
+        raise CoderLandError("API 路径包含过深的百分号编码。")
     if "\\" in decoded_path or any(segment in {".", ".."} for segment in decoded_path.split("/")):
         raise CoderLandError("API 路径包含不安全的路径片段。")
     if parsed_path != API_PREFIX and not parsed_path.startswith(API_PREFIX + "/"):
@@ -281,11 +390,10 @@ def command_api(args) -> None:
     if method == "DELETE":
         headers["X-CoderLand-Confirm-Delete"] = "confirmed"
     if args.output:
-        raw, response_headers = _request(method, path, api_key=api_key, body=body, headers=headers)
         output = Path(args.output).expanduser()
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(raw)
-        print(json.dumps({"saved_to": str(output.resolve()), "content_type": response_headers.get("Content-Type", "")}, ensure_ascii=False))
+        size, response_headers = _request_to_file(method, path, output, api_key=api_key, body=body, headers=headers)
+        print(json.dumps({"saved_to": str(output.resolve()), "bytes": size,
+                          "content_type": response_headers.get("Content-Type", "")}, ensure_ascii=False))
         return
     raw, _ = _request(method, path, api_key=api_key, body=body, headers=headers)
     try:
@@ -947,6 +1055,227 @@ def command_upload_file(args) -> None:
     print(json.dumps({"uploaded": True, "result": result}, ensure_ascii=False, indent=2))
 
 
+def _paper_pdf_bytes(path_value: str | Path) -> bytes:
+    path = Path(path_value).expanduser().resolve()
+    if not path.is_file() or path.suffix.lower() != ".pdf":
+        raise CoderLandError("论文附件必须是 PDF 文件。")
+    size = path.stat().st_size
+    if not 0 < size <= MAX_PAPER_PDF_BYTES:
+        raise CoderLandError("PDF 不能为空且不能超过 50 MiB。")
+    with path.open("rb") as stream:
+        signature = stream.read(5)
+        stream.seek(max(0, size - 4096))
+        ending = stream.read(4096)
+        stream.seek(0)
+        data = stream.read(MAX_PAPER_PDF_BYTES + 1)
+    if len(data) != size:
+        raise CoderLandError("读取 PDF 时文件大小发生变化，请重新选择文件。")
+    if signature != b"%PDF-" or b"%%EOF" not in ending:
+        raise CoderLandError("文件内容不像有效的 PDF，请检查后重新选择。")
+    return data
+
+
+def _paper_multipart(fields: dict[str, str], pdf_bytes: bytes | None = None) -> tuple[bytes, str]:
+    allowed_fields = {"candidate_token", "dataset_id", "network_name"}
+    if not fields or any(name not in allowed_fields for name in fields):
+        raise CoderLandError("论文表单字段无效。")
+    boundary = "----CoderLandSkill" + secrets.token_hex(16)
+    parts: list[bytes] = []
+    for name, value in fields.items():
+        if not isinstance(value, str) or any(ord(char) < 32 or ord(char) == 127 for char in value):
+            raise CoderLandError("论文表单字段包含无效字符。")
+        parts.extend((
+            f"--{boundary}\r\n".encode("ascii"),
+            f'Content-Disposition: form-data; name="{name}"\r\n'.encode("ascii"),
+            b"Content-Type: text/plain; charset=utf-8\r\n\r\n",
+            value.encode("utf-8"),
+            b"\r\n",
+        ))
+    if pdf_bytes is not None:
+        parts.extend((
+            f"--{boundary}\r\n".encode("ascii"),
+            b'Content-Disposition: form-data; name="pdf"; filename="paper.pdf"\r\n',
+            b"Content-Type: application/pdf\r\n\r\n",
+            pdf_bytes,
+            b"\r\n",
+        ))
+    parts.append(f"--{boundary}--\r\n".encode("ascii"))
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
+
+def _paper_fields(dataset_id: str) -> dict[str, str]:
+    value = dataset_id.strip()
+    if not re.fullmatch(r"[a-z0-9-]{1,64}", value):
+        raise CoderLandError("数据集标识无效。")
+    return {"dataset_id": value}
+
+
+def command_add_paper(args) -> None:
+    api_key = load_api_key()
+    fields = _paper_fields(args.dataset_id)
+    query = args.query.strip()
+    network_name = args.network_name.strip()
+    if not 2 <= len(query) <= 512 or any(ord(char) < 32 or ord(char) == 127 for char in query):
+        raise CoderLandError("论文搜索词长度应为 2–512 个字符。")
+    if not 1 <= len(network_name) <= 255 or any(ord(char) < 32 or ord(char) == 127 for char in network_name):
+        raise CoderLandError("网络简称长度应为 1–255 个字符，且不能包含控制字符。")
+    pdf_bytes = _paper_pdf_bytes(args.pdf) if args.pdf else None
+    search = _request_json(
+        "POST", API_PREFIX + "/papers/search", api_key=api_key,
+        body={"dataset_id": fields["dataset_id"], "query": query},
+    )
+    candidates = search.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        raise CoderLandError("没有找到可添加的论文候选项。")
+    print("论文候选（选择序号以继续；取消或输入无效内容不会创建论文）：")
+    for index, candidate in enumerate(candidates, start=1):
+        if not isinstance(candidate, dict):
+            continue
+        title = str(candidate.get("title") or "（无标题）")
+        authors = str(candidate.get("authors") or "")
+        year = str(candidate.get("year") or "")
+        venue = str(candidate.get("venue") or "")
+        doi = str(candidate.get("doi") or "")
+        details = " · ".join(value for value in (authors, year, venue, doi) if value)
+        print(f"{index}. {title}" + (f"\n   {details}" if details else ""))
+    try:
+        selection = input("请选择论文序号：").strip()
+        selected_index = int(selection) - 1
+    except (EOFError, ValueError) as exc:
+        raise CoderLandError("没有取得有效的论文选择，未添加论文。") from exc
+    if not 0 <= selected_index < len(candidates) or not isinstance(candidates[selected_index], dict):
+        raise CoderLandError("论文序号无效，未添加论文。")
+    candidate_token = str(candidates[selected_index].get("candidate_token") or "")
+    if not candidate_token:
+        raise CoderLandError("候选论文缺少服务端确认令牌，请重新搜索。")
+    fields["candidate_token"] = candidate_token
+    fields["network_name"] = network_name
+    request_body, content_type = _paper_multipart(fields, pdf_bytes)
+    result = _request_json(
+        "POST", API_PREFIX + "/papers", api_key=api_key, raw=request_body,
+        headers={"Content-Type": content_type}, timeout=3600,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def command_upload_paper_pdf(args) -> None:
+    api_key = load_api_key()
+    fields = _paper_fields(args.dataset_id)
+    paper_id = args.paper_id.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{32}", paper_id):
+        raise CoderLandError("论文记录 ID 无效。")
+    pdf_bytes = _paper_pdf_bytes(args.pdf)
+    request_body, content_type = _paper_multipart(fields, pdf_bytes)
+    result = _request_json(
+        "POST", f"{API_PREFIX}/papers/{paper_id}/pdf", api_key=api_key, raw=request_body,
+        headers={"Content-Type": content_type}, timeout=3600,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def _http_error_status(exc: CoderLandError) -> int | None:
+    cause = exc.__cause__
+    return int(cause.code) if isinstance(cause, urllib.error.HTTPError) else None
+
+
+def _find_submission_in_dataset(api_key: str, dataset_id: str, submission_id: str) -> dict | None:
+    path = f"{API_PREFIX}/datasets/{urllib.parse.quote(dataset_id, safe='-')}"
+    response = _request_json("GET", path, api_key=api_key)
+    dataset = response.get("dataset") or {}
+    for collection_name in ("submissions", "pending_submissions"):
+        records = dataset.get(collection_name) or []
+        if not isinstance(records, list):
+            continue
+        for record in records:
+            if isinstance(record, dict) and str(record.get("id") or "") == submission_id:
+                return {"collection": collection_name, "record": record}
+    return None
+
+
+def _report_catalog_finalize_result(api_key: str, dataset_id: str, staging_id: str) -> bool:
+    found = _find_submission_in_dataset(api_key, dataset_id, staging_id)
+    if not found:
+        return False
+    record = found["record"]
+    if found["collection"] == "submissions" and str(record.get("workflow_status") or "") == "completed":
+        print(json.dumps({"finalized": True, "confirmed_by": "dataset_catalog", "submission": record},
+                         ensure_ascii=False, indent=2))
+        return True
+    status = str(record.get("status") or record.get("workflow_status") or "pending")
+    print(f"提交记录仍在目录的待处理列表中：{status}。不会重复调用 finalize。", flush=True)
+    return False
+
+
+def _wait_after_finalize_uncertainty(api_key: str, dataset_id: str, staging_id: str, wait_timeout: int) -> bool:
+    deadline = time.monotonic() + max(0, wait_timeout)
+    while True:
+        try:
+            stage = _request_json("GET", f"{API_PREFIX}/staging/{staging_id}", api_key=api_key)
+            if str(stage.get("dataset_id") or "") != dataset_id:
+                raise CoderLandError("暂存记录属于另一个数据集；停止确认并且没有重试 finalize。")
+            status = str(stage.get("status") or "unknown")
+            message = str(stage.get("status_message") or status)
+            print(f"正在等待评测：{message}", flush=True)
+            if status == "failed":
+                raise CoderLandError(f"服务端报告评测失败：{message}")
+        except CoderLandError as exc:
+            if _http_error_status(exc) != 404:
+                raise
+            if _report_catalog_finalize_result(api_key, dataset_id, staging_id):
+                return True
+            if time.monotonic() >= deadline:
+                raise CoderLandError(
+                    "暂存记录已不存在，数据集目录也暂未找到对应完成记录；结果无法确认。为避免重复提交，没有再次调用 finalize。"
+                ) from exc
+            print("暂存记录返回 404，正在数据集目录中确认同 ID 的复现记录；不会重发提交。", flush=True)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise CoderLandError("评测仍未进入可确认状态；暂存 ID 已保留，未再次调用 finalize。")
+        time.sleep(min(3, remaining))
+
+
+def command_finalize(args) -> None:
+    api_key = load_api_key()
+    dataset_id = _paper_fields(args.dataset_id)["dataset_id"]
+    staging_id = args.staging_id.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{32}", staging_id):
+        raise CoderLandError("暂存记录 ID 无效。")
+    staging_path = f"{API_PREFIX}/staging/{staging_id}"
+    try:
+        stage = _request_json("GET", staging_path, api_key=api_key)
+    except CoderLandError as exc:
+        if _http_error_status(exc) == 404:
+            if _report_catalog_finalize_result(api_key, dataset_id, staging_id):
+                return
+            raise CoderLandError("暂存记录不存在，且数据集目录没有同 ID 的已完成复现；未调用 finalize。") from exc
+        raise
+    if str(stage.get("dataset_id") or "") != dataset_id:
+        raise CoderLandError("暂存记录属于另一个数据集；未调用 finalize。")
+    status = str(stage.get("status") or "")
+    if status == "evaluating":
+        print("正在等待评测；暂存记录已处于评测中，不会重复调用 finalize。", flush=True)
+        _wait_after_finalize_uncertainty(api_key, dataset_id, staging_id, args.wait_timeout)
+        return
+    if status != "uploading":
+        raise CoderLandError(f"暂存记录状态为 {status or 'unknown'}，未调用 finalize。")
+    print("正在等待评测（服务端完成后会返回指标）…", flush=True)
+    try:
+        result = _request_json(
+            "POST", staging_path + "/finalize", api_key=api_key, body={}, timeout=args.request_timeout,
+        )
+    except CoderLandError as exc:
+        status_code = _http_error_status(exc)
+        transport_uncertain = status_code is None
+        response_uncertain = status_code in {404, 502, 503}
+        if not (transport_uncertain or response_uncertain):
+            raise
+        print("finalize 请求超时或响应丢失；先只读核对状态，不会重复提交。", flush=True)
+        if _wait_after_finalize_uncertainty(api_key, dataset_id, staging_id, args.wait_timeout):
+            return
+        raise CoderLandError("无法确认最终评测结果；没有再次调用 finalize。") from exc
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="码境实验 Agent Skill 内置辅助脚本（Python 标准库）")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -976,6 +1305,23 @@ def build_parser() -> argparse.ArgumentParser:
     upload_file.add_argument("--target", required=True)
     upload_file.add_argument("--file", required=True)
     upload_file.set_defaults(func=command_upload_file)
+    add_paper = commands.add_parser("add-paper", help="搜索候选论文并将用户选定的论文添加到数据集")
+    add_paper.add_argument("--dataset-id", required=True)
+    add_paper.add_argument("--query", required=True)
+    add_paper.add_argument("--network-name", required=True)
+    add_paper.add_argument("--pdf", help="可选的论文 PDF，最大 50 MiB")
+    add_paper.set_defaults(func=command_add_paper)
+    upload_paper_pdf = commands.add_parser("upload-paper-pdf", help="向已有论文记录上传 PDF")
+    upload_paper_pdf.add_argument("--paper-id", required=True)
+    upload_paper_pdf.add_argument("--dataset-id", required=True)
+    upload_paper_pdf.add_argument("--pdf", required=True)
+    upload_paper_pdf.set_defaults(func=command_upload_paper_pdf)
+    finalize = commands.add_parser("finalize", help="完成评测并在超时后只读确认最终提交状态")
+    finalize.add_argument("--staging-id", required=True)
+    finalize.add_argument("--dataset-id", required=True)
+    finalize.add_argument("--request-timeout", type=int, default=3600, help="finalize 请求超时秒数")
+    finalize.add_argument("--wait-timeout", type=int, default=600, help="超时后只读核对状态的等待秒数")
+    finalize.set_defaults(func=command_finalize)
     api = commands.add_parser("api", help="调用 /api/v1/experiments 成员 API")
     api.add_argument("method", choices=("GET", "POST", "DELETE"))
     api.add_argument("path", help="/api/v1/experiments/... 或服务器返回的对应资源路径")

@@ -43,10 +43,10 @@ description: 浏览和管理码境实验空间；整理并上传数据集或实�
 | 用户请求 | 操作流程 |
 | --- | --- |
 | 浏览实验、数据集、论文或结果 | 通过 `GET /api/v1/experiments` 读取目录；保留服务端返回的 ID 和顺序。 |
-| 添加论文 | 先搜索候选论文，再添加用户选定的条目。只有用户明确指出方法为原创，或项目资料能证明时，才使用原创网络记录。 |
+| 添加论文 | 使用 `add-paper` 搜索候选论文，让用户选择后再关联到数据集；可选上传 PDF。已有论文上传 PDF 时使用 `upload-paper-pdf`。只有用户明确指出方法为原创，或项目资料能证明时，才使用原创网络记录。 |
 | 创建数据集 | 选择实时上传规范，检查用户指定的测试 ZIP 和可选训练 ZIP，再通过 BUU 上传。 |
-| 提交复现 | 确认数据集和论文，创建暂存记录，只上传所需结果文件，完成提交并轮询状态。 |
-| 查看或下载结果 | 读取记录与指标，并使用服务端提供的预览或下载路由。仅保存到用户认可的位置。 |
+| 提交复现 | 确认数据集和论文，创建暂存记录，只上传所需结果文件，再用 `finalize` 完成评测。 |
+| 查看或下载结果 | 读取记录与指标，并使用服务端提供的预览或下载路由。二进制文件用 `api --output PATH` 流式保存；仅保存到用户认可的位置。 |
 | 修改公开状态或删除记录 | 使用仅限记录所有者的 API。永久删除前说明影响，并在发起请求前取得用户明确确认。 |
 
 如果用户未明确指定数据集、论文或结果包，且 API 信息无法消除歧义，先请用户选择。不要从目录名、ZIP 文件名或最新记录猜测操作目标。
@@ -71,7 +71,7 @@ description: 浏览和管理码境实验空间；整理并上传数据集或实�
 2. 创建数据集需要用户指定类别、名称、描述、测试 ZIP 和可选训练 ZIP。将类别对应到明确的实时规范；先用 `inspect` 校验，仅在有需要时用 `package` 生成新 ZIP。
 3. 生成的压缩包保存在当前项目的 `coderland-output/`。传输前检查 BUU 上传可用性。辅助脚本使用短时、文件专属票据和顺序分块；上传中断时查询会话状态，仅从服务端确认的字节偏移续传。
 4. 提交复现前，先确认数据集、论文和结果类型，再创建暂存记录。按接口文档选择上传 ZIP、预测 JSON、权重或 PDF。除非当前合约明确要求，不要把原始测试图片当作复现结果上传。必需文件全部完成后再最终提交。
-5. 轮询暂存资源，直到评测进入终止状态。报告记录 ID、服务端返回的指标及数值、图片数量、输出路径和警告。不能只凭进度条满格就认定上传或评测成功。
+5. 用 `finalize --staging-id ID --dataset-id ID` 等待评测。成功时服务端同步返回指标，并把同一 ID 写入数据集目录后删除暂存资源；因此成功后 `GET /staging/{id}` 返回 404 是预期行为。若请求超时或响应丢失，先读暂存状态；遇到 404 时按同一 ID 查询所选数据集的 `submissions`。只有目录中找到 `workflow_status=completed` 的记录才报告成功。绝不因超时盲目再次调用 finalize；无法确认时报告 ID 和不确定状态。
 
 复原任务的结果图片名必须按实时合约与测试输入对应。COCO 目标检测和人体关键点任务应按接口要求上传 `predictions.json`；适用指标由服务端使用数据集标注计算。不要自行计算或伪造官方分数。
 
@@ -83,6 +83,9 @@ description: 浏览和管理码境实验空间；整理并上传数据集或实�
 - `package --profile PROFILE --source PATH`：校验并在 `coderland-output/` 下生成新 ZIP。
 - `upload-dataset --category CATEGORY --name NAME --description TEXT --test ZIP [--train ZIP]`：通过 BUU 创建数据集。
 - `upload-file --target LEGACY_API_PATH --file PATH`：通过 BUU 向已有暂存记录上传一个允许的文件。
+- `add-paper --dataset-id ID --query TEXT --network-name NAME [--pdf PATH]`：搜索候选论文并提示用户选择；候选令牌只在当前进程内使用。PDF 可选，最大 50 MiB。
+- `upload-paper-pdf --paper-id ID --dataset-id ID --pdf PATH`：为已有论文记录上传 PDF。
+- `finalize --staging-id ID --dataset-id ID [--request-timeout SECONDS] [--wait-timeout SECONDS]`：完成评测；请求超时后只读核对暂存和数据集目录，不重发 finalize。
 - `api METHOD /api/v1/experiments/...`：调用解析器和 API 合约允许的成员 API。DELETE 必须在用户确认后加 `--confirmed-delete`；API Key 撤销需在账号设置中操作。
 
 参数和 ID 示例需替换为用户已选定的值：
@@ -95,16 +98,18 @@ python scripts/coderland.py inspect --profile paired-restoration --source ./sele
 python scripts/coderland.py package --profile paired-restoration --source ./selected-dataset
 python scripts/coderland.py upload-dataset --profile paired-restoration --category 去雾 \
   --name 示例数据 --description 室外去雾 --test ./coderland-output/selected-dataset-paired-restoration.zip
+python scripts/coderland.py add-paper --dataset-id selected-dataset --query "Paper title" --network-name "Method name"
+python scripts/coderland.py finalize --staging-id SELECTED_STAGING_ID --dataset-id selected-dataset
 ```
 
-命令示例中不要放 API Key。`api` 只接受解析器和接口合约允许的方法、路径。二进制响应使用 `--output` 保存，不要把文件字节打印到终端。
+命令示例中不要放 API Key。`api` 只接受解析器和接口合约允许的方法、路径。二进制响应使用 `--output PATH` 保存：脚本按 1 MiB 块流式写入临时文件，报告传输进度，校验服务端给出的文件长度后再原子替换目标；未知长度时显示已接收字节。下载失败会清理临时文件并保留原目标。数据集 ZIP 的 Google Drive 重定向仅允许 HTTPS 的指定下载主机和路径，跳转时不会转发 CoderLand API Key；不要把文件字节打印到终端。
 
 ## 常见响应处理
 
 - `400`：转述服务端校验信息，只修正明确指出的输入，不猜另一种规范。
 - `401`：停止 API 操作，引导用户前往[码境账号设置](https://code.zuicat.cn/profile/?tab=settings)检查或重新生成 Key；用户准备好后通过本机隐藏输入重新配置，不要索要聊天中的密钥。
 - `403`：停止；当前账号没有访问权限。
-- `404`：按资源不存在或不可访问处理，不要枚举其他 ID。
+- `404`：通常按资源不存在或不可访问处理，不要枚举其他 ID。finalize 请求超时后，暂存资源 404 可能表示已完成；此时只按原暂存 ID 查询用户指定数据集目录确认，不得重发 finalize。
 - `409`：读取冲突信息，先满足服务端指出的前置条件再重试。
 - `410` 或 `FEATURE_DISABLED`：API 或上传会话不可用；停止，不回退到仅限网站会话的接口。
 - `413`：检查当前大小限制，仅在规范允许时重新打包。

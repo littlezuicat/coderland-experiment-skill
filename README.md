@@ -105,9 +105,14 @@ python3 "$SKILL" contract
 python3 "$SKILL" api GET /api/v1/experiments
 python3 "$SKILL" inspect --profile coco-detection --source ./dataset.zip
 python3 "$SKILL" package --profile paired-restoration --source ./dataset-folder
+python3 "$SKILL" add-paper --dataset-id selected-dataset --query "Paper title" --network-name "Method name"
 ```
 
 新生成的 ZIP 放在当前项目的 `coderland-output/` 目录。脚本尽量保留图片和权重原始字节；只有实时规范允许时才会调整 ZIP 内的路径，以及 COCO JSON 中相应的 `file_name`。
+
+`add-paper` 会显示候选论文并要求选择序号，候选令牌不会打印出来。可加 `--pdf PATH` 一并上传论文 PDF；为已有论文补传 PDF 使用 `upload-paper-pdf --paper-id ID --dataset-id ID --pdf PATH`。PDF 必须通过文件签名检查且不超过 50 MiB。复现评测使用 `finalize --staging-id ID --dataset-id ID`；请求超时后辅助脚本只读核对暂存和数据集目录，不会重复提交。
+
+`api METHOD PATH --output FILE` 会将二进制响应按块直接写入目标文件；传输中显示进度，成功后才替换已有目标，失败时会保留原文件并清理临时文件。未知总大小时仍会显示已接收字节。
 
 ## 安全与边界
 
