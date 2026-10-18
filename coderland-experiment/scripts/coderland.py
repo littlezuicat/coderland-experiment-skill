@@ -304,10 +304,15 @@ def load_api_key() -> str:
     return str(load_credentials()["api_key"])
 
 
-def command_login(_args) -> None:
-    print("如果还没有 API Key，请先打开码境账号设置生成：")
-    print("https://code.zuicat.cn/profile/?tab=settings")
-    api_key = getpass.getpass("请在此处粘贴 API Key（输入不回显；不要发到聊天中）：").strip()
+def command_login(args) -> None:
+    if getattr(args, "stdin", False):
+        api_key = sys.stdin.readline().strip()
+        if not api_key:
+            raise CoderLandError("没有从标准输入读取到 API Key；请从账号设置重新复制完整登录命令。")
+    else:
+        print("如果还没有 API Key，请先打开码境账号设置生成：")
+        print("https://code.zuicat.cn/profile/?tab=settings")
+        api_key = getpass.getpass("请在此处粘贴 API Key（输入不回显；不要发到聊天中）：").strip()
     if not re.fullmatch(r"cl_exp_[A-Za-z0-9_-]{32,64}", api_key):
         raise CoderLandError("API Key 格式无效；请在码境个人中心重新复制完整密钥。")
     path = save_credentials({"api_base_url": API_BASE, "api_key": api_key, "created_at": time.strftime("%Y-%m-%d %H:%M:%S")})
@@ -1286,8 +1291,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="码境实验 Agent Skill 内置辅助脚本（Python 标准库）")
     commands = parser.add_subparsers(dest="command", required=True)
     login = commands.add_parser("login", help="安全配置码境 API Key（本机隐藏输入）")
+    login.add_argument("--stdin", action="store_true", help="从标准输入读取 Key，供账号设置页生成的 CMD 命令使用")
     login.set_defaults(func=command_login)
     configure = commands.add_parser("configure", help="旧命令兼容别名：保存 API Key")
+    configure.add_argument("--stdin", action="store_true", help=argparse.SUPPRESS)
     configure.set_defaults(func=command_login)
     forget = commands.add_parser("forget", help="清除本机保存的 API Key")
     forget.set_defaults(func=command_forget)
