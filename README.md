@@ -19,7 +19,7 @@
 
 ## 🚀 一句话安装
 
-把这句话发给 Codex，它会从本仓库安装 Skill。首次登录时，码境账号设置会自动识别系统并生成一条内含登录 Key 的命令；在本机运行一次即可验证身份并保存凭据，不需要再单独复制或粘贴 Key。命令仅供本人本机使用，不要发到聊天里：
+请把下面的话发给 Codex：
 
 ```text
 请从 https://github.com/littlezuicat/coderland-experiment-skill 安装码境实验 Skill；需要登录时，引导我到 https://code.zuicat.cn/profile/?tab=settings 生成命令并在本机运行。
