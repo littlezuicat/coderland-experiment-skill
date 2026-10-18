@@ -253,6 +253,9 @@ def api_path(path: str) -> str:
         if parsed.query:
             path += "?" + parsed.query
     parsed_path = urllib.parse.urlsplit(path).path
+    decoded_path = urllib.parse.unquote(parsed_path)
+    if "\\" in decoded_path or any(segment in {".", ".."} for segment in decoded_path.split("/")):
+        raise CoderLandError("API 路径包含不安全的路径片段。")
     if parsed_path != API_PREFIX and not parsed_path.startswith(API_PREFIX + "/"):
         raise CoderLandError("Skill 只能访问 /api/v1/experiments 下的成员接口。")
     return path
@@ -349,8 +352,13 @@ def _collect_entries(source: Path, max_unpacked: int = MAX_ARCHIVE_UNPACKED) -> 
         raise CoderLandError("输入内容为空。")
     root_names = {entry["name"].split("/", 1)[0] for entry in entries if "/" in entry["name"]}
     has_root_files = any("/" not in entry["name"] for entry in entries)
-    if len(root_names) == 1 and not has_root_files and all("/" in entry["name"] for entry in entries):
-        root = next(iter(root_names)) + "/"
+    single_root = next(iter(root_names), "")
+    # Keep semantic profile directories such as input/ and annotations/ intact.
+    # In particular, a no-reference archive commonly contains only input/*;
+    # stripping that sole root makes an otherwise valid archive fail validation.
+    if (len(root_names) == 1 and single_root.casefold() not in {"input", "gt", "annotations"}
+            and not has_root_files and all("/" in entry["name"] for entry in entries)):
+        root = single_root + "/"
         if all(entry["name"].startswith(root) for entry in entries):
             for entry in entries:
                 entry["name"] = entry["name"][len(root):]

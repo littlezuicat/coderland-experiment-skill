@@ -127,10 +127,12 @@ python3 "$SKILL" package --profile paired-restoration --source ./dataset-folder
 ├── assets/
 │   ├── coderland-logo-dark.svg
 │   └── coderland-logo-light.svg
-└── coderland-experiment/
-    ├── SKILL.md
-    └── scripts/
-        └── coderland.py
+├── coderland-experiment/
+│   ├── SKILL.md
+│   └── scripts/
+│       └── coderland.py
+└── tests/
+    └── test_coderland.py
 ```
 
 ## 反馈
