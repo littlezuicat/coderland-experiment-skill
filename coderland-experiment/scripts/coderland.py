@@ -137,16 +137,18 @@ def _request(method: str, path: str, *, base: str | None = None, api_key: str | 
 
 def _request_json(method: str, path: str, *, base: str | None = None,
                   api_key: str | None = None, body: object | None = None,
-                  headers: dict[str, str] | None = None, timeout: int = 120) -> dict:
-    raw, _ = _request(method, path, base=base, api_key=api_key, body=body, headers=headers, timeout=timeout)
+                  raw: bytes | None = None, headers: dict[str, str] | None = None,
+                  timeout: int = 120) -> dict:
+    response_body, _ = _request(
+        method, path, base=base, api_key=api_key, body=body, raw=raw, headers=headers, timeout=timeout
+    )
     try:
-        result = json.loads(raw.decode("utf-8")) if raw else {}
+        result = json.loads(response_body.decode("utf-8")) if response_body else {}
     except (ValueError, UnicodeDecodeError) as exc:
         raise CoderLandError("服务器返回的 JSON 无效。") from exc
     if not isinstance(result, dict):
         raise CoderLandError("服务器返回了非对象 JSON。")
     return result
-
 
 def _request_file(method: str, path: str, file_path: Path, *, base: str,
                   api_key: str, content_type: str, timeout: int = 3600) -> tuple[bytes, dict[str, str]]:

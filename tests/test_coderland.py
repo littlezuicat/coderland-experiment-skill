@@ -3,6 +3,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 script_path = Path(__file__).resolve().parents[1] / "coderland-experiment" / "scripts" / "coderland.py"
 spec = importlib.util.spec_from_file_location("coderland_skill", script_path)
@@ -56,6 +57,21 @@ class ApiPathTests(unittest.TestCase):
         self.assertEqual(
             coderland.api_path("/api/experiments/datasets?limit=5"),
             "/api/v1/experiments/datasets?limit=5",
+        )
+
+
+class RequestJsonTests(unittest.TestCase):
+    def test_raw_bytes_are_forwarded_to_request(self):
+        raw_body = b"synthetic-grant\\nsynthetic-chunk"
+        with patch.object(coderland, "_request", return_value=(b'{\"received\": 31}', {})) as request:
+            result = coderland._request_json(
+                "POST", "/api/v1/experiments/datasets/upload-chunk", raw=raw_body,
+            )
+
+        self.assertEqual(result, {"received": 31})
+        request.assert_called_once_with(
+            "POST", "/api/v1/experiments/datasets/upload-chunk",
+            base=None, api_key=None, body=None, raw=raw_body, headers=None, timeout=120,
         )
 
 
