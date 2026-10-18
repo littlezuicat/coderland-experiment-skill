@@ -17,6 +17,16 @@
   <img alt="Python" src="https://img.shields.io/badge/Python-stdlib-3776AB?style=flat-square">
 </p>
 
+## 🚀 一句话安装
+
+把这句话发给 Codex，它会从本仓库安装 Skill；如果本机还没有 API Key，也会引导你生成并安全配置：
+
+```text
+请用 skill-installer 从 https://github.com/littlezuicat/coderland-experiment-skill 安装码境实验 Skill；如果我还没有 API Key，请引导我打开 https://code.zuicat.cn/profile/?tab=settings 生成，然后通过本机隐藏输入配置，不要让我把密钥发到对话里。
+```
+
+安装完成后，Codex 可按 Skill 说明处理后续的码境实验任务。
+
 ## 它能做什么
 
 这个 Skill 为 Codex 提供一套码境实验空间的操作说明，并附带一个仅依赖 Python 标准库的辅助脚本。它会先读取服务端当前 API 合约和数据集规范，再按用户选定的目标执行操作。
@@ -56,9 +66,7 @@ Skill 会读取实时上传规范；下表帮助你快速了解常见结构。�
 
 ## 在 Codex 中安装
 
-在 Codex 对话里发送下面这句即可从本公开仓库安装：
-
-> 请使用 `skill-installer`，从 `https://github.com/littlezuicat/coderland-experiment-skill/tree/main/coderland-experiment` 安装码境实验 Skill。
+在 Codex 对话里发送上面的「一句话安装」提示词即可。若 API Key 尚未生成或本机还没有配置，按提示前往[码境账号设置](https://code.zuicat.cn/profile/?tab=settings)生成，再通过本机隐藏输入完成配置；不要把密钥发进聊天。
 
 安装后重启或刷新 Codex 的 Skill 发现。安装目录通常是 `~/.codex/skills/coderland-experiment`。你也可以直接打开 [Skill 说明](coderland-experiment/SKILL.md) 查看完整操作规则。
 
@@ -73,7 +81,7 @@ cp -R coderland-experiment/. ~/.codex/skills/coderland-experiment/
 
 ## 首次使用
 
-1. 登录码境，在「个人中心 → 账号设置」生成实验 API Key。完整密钥只显示一次。
+1. 如果还没有 API Key，登录码境并打开[个人中心 → 账号设置](https://code.zuicat.cn/profile/?tab=settings)生成。完整密钥只显示一次。
 2. 在终端运行辅助脚本的 `configure` 命令，并在隐藏输入提示中粘贴密钥；不要把密钥发到对话里。
 3. 运行 `contract` 获取当前 API 规则与上传规范。
 4. 后续可让 Codex 直接处理任务，例如：“检查我选中的数据集 ZIP 是否符合 COCO 目标检测格式。”
