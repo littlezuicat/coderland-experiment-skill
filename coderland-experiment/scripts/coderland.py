@@ -308,17 +308,19 @@ def command_login(args) -> None:
     if getattr(args, "stdin", False):
         api_key = sys.stdin.readline().strip()
         if not api_key:
-            raise CoderLandError("没有从标准输入读取到 API Key；请从账号设置重新复制完整登录命令。")
+            raise CoderLandError("没有从标准输入读取到 API Key；请重新运行本机登录流程。")
     else:
-        print("如果还没有 API Key，请先打开码境账号设置生成：")
+        print("如果还没有 API Key，请先打开码境账号设置：")
         print("https://code.zuicat.cn/profile/?tab=settings")
         api_key = getpass.getpass("请在此处粘贴 API Key（输入不回显；不要发到聊天中）：").strip()
     if not re.fullmatch(r"cl_exp_[A-Za-z0-9_-]{32,64}", api_key):
-        raise CoderLandError("API Key 格式无效；请在码境个人中心重新复制完整密钥。")
+        raise CoderLandError("API Key 格式无效；请在码境个人中心重新复制密钥。")
+    print("正在向码境验证 API Key…")
+    _request_json("GET", API_PREFIX + "/contract", api_key=api_key, timeout=30)
     path = save_credentials({"api_base_url": API_BASE, "api_key": api_key, "created_at": time.strftime("%Y-%m-%d %H:%M:%S")})
-    print(f"API Key 已保存到：{path}")
+    print("登录成功：API Key 已验证并保存在本机。")
+    print(f"凭据位置：{path}")
     print("此命令只在本机保存密钥；如需停用，请在码境个人中心撤销。")
-
 
 # Keep the old command as a compatibility alias for existing local instructions.
 command_configure = command_login
