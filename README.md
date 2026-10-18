@@ -22,7 +22,7 @@
 请把下面的话发给 Codex：
 
 ```text
-请从 https://github.com/littlezuicat/coderland-experiment-skill 安装码境实验 Skill；需要登录时，引导我到 https://code.zuicat.cn/profile/?tab=settings 生成命令并在本机运行。
+请从 https://github.com/littlezuicat/coderland-experiment-skill 安装码境实验 Skill；需要登录时，直接向我索取 API Key 并由 Skill 在本机完成登录。
 ```
 
 安装完成后，Codex 可按 Skill 说明处理后续的码境实验任务。
@@ -67,7 +67,7 @@ Skill 会读取实时上传规范；下表帮助你快速了解常见结构。�
 
 ## 在 Codex 中安装
 
-在 Codex 对话里发送上面的「一句话安装」提示词即可。若尚未登录，打开[码境账号设置](https://code.zuicat.cn/profile/?tab=settings)，页面会自动识别系统并生成一条内含 Key 的登录命令。复制后在自己的电脑运行一次，命令会调用码境登录验证接口，并把凭据保存到 Skill 使用的本机配置文件；无需再次复制或粘贴 Key。命令只对 Key 做 Base64 编码以便嵌入单行命令，但这不是加密，请勿转发或截图。登录完成后告诉 Codex“登录完成”即可。
+在 Codex 对话里发送上面的「一句话安装」提示词即可。首次使用或 Key 失效时，Skill 会直接向你索取明文 API Key；没有 Key 时可前往[码境账号设置](https://code.zuicat.cn/profile/?tab=settings)生成。你提供 Key 后，Skill 会在本机调用辅助脚本验证并保存凭据，不需要复制或运行单独的登录命令。Skill 不会在回复或日志中复述 Key。
 
 安装后重启或刷新 Codex 的 Skill 发现。安装目录通常是 `~/.codex/skills/coderland-experiment`。你也可以直接打开 [Skill 说明](coderland-experiment/SKILL.md) 查看完整操作规则。
 
@@ -82,11 +82,11 @@ cp -R coderland-experiment/. ~/.codex/skills/coderland-experiment/
 
 ## 首次使用
 
-1. 打开[个人中心 → 账号设置](https://code.zuicat.cn/profile/?tab=settings)。首次使用时点“启用登录并生成命令”；已有 Key 时点“生成登录命令”。页面会自动识别 Windows、macOS 或 Linux。
-2. 复制页面给出的一条命令，在自己的电脑终端运行。命令内含登录 Key，会直接请求码境验证接口；验证成功后保存到本机配置文件。无需单独复制或粘贴 Key，也不要把命令发给 Agent、聊天、截图或他人。若验证成功，回复 Codex“登录完成”。
+1. 需要登录时，Skill 会向你索取 API Key。若还没有 Key，打开[个人中心 → 账号设置](https://code.zuicat.cn/profile/?tab=settings)生成。
+2. 将 Key 直接粘贴到当前 Codex 对话。Skill 会在本机调用 `login`，先验证 Key，再保存到本机配置文件；你不需要复制或运行登录命令。
 3. Skill 会读取当前 API 规则与上传规范，然后即可让 Codex 处理实验任务，例如：“检查我选中的数据集 ZIP 是否符合 COCO 目标检测格式。”
 
-登录命令使用 Windows 系统自带的 PowerShell；macOS 使用系统 shell 与 curl；Linux 使用 shell，并尝试 curl 或 wget。登录命令不需要 Python。后续 Skill 的实验操作脚本使用 Python 标准库；若本机尚未安装 Python，后续实验操作仍需先安装 Python 3。登录后可用以下命令手动读取实时合约：
+后续 Skill 的实验操作脚本使用 Python 标准库；若本机尚未安装 Python，实验操作需要先安装 Python 3。登录后可用以下命令手动读取实时合约：
 
 ```bash
 python3 ~/.codex/skills/coderland-experiment/scripts/coderland.py contract
@@ -117,7 +117,8 @@ python3 "$SKILL" add-paper --dataset-id selected-dataset --query "Paper title" -
 
 - 只操作用户明确选定的数据集、论文、记录和文件，不按文件名或“最近记录”猜目标。
 - 只处理当前 API Key 所属账号的数据；公开状态仅作用于本人支持的复现记录。
-- API Key、BUU 临时票据、可续传 URL 和研究文件都是私密信息，不应进入公开仓库、手工命令参数、日志或聊天内容。账号设置生成的登录命令本身含 Key（Key 仅做 Base64 编码，并非加密），只能在本人电脑运行，禁止转发、截图或公开保存。
+- 本 Skill 允许你在当前对话中直接提供明文 API Key 用于登录。Key 不会被 Skill 复述或打印；验证后仅保存到本机凭据文件。不要把 Key 放进公开仓库、命令行参数、日志、问题报告或生成文件。
+- BUU 临时票据、可续传 URL 和研究文件仍属于私密信息，不得放入公开仓库、日志或问题报告。
 - 删除是永久操作；必须先说明目标和影响，并在删除请求前取得用户明确确认。不会删除数据集。
 - 上传前检查 BUU 通道是否可用。不可用时停止，不绕到浏览器会话接口或公网线路上传。
 - 服务端返回 `410` 或 `FEATURE_DISABLED` 时，表示 API 暂不可用；停止操作，不绕过限制。
