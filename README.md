@@ -1,55 +1,130 @@
-# CoderLand Experiment Skill
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/coderland-logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="./assets/coderland-logo-light.svg">
+    <img src="./assets/coderland-logo-light.svg" alt="CODERLAND 码境" width="380">
+  </picture>
+</p>
 
-An installable Codex Skill and small Python helper for working with the CoderLand experiment space. It can inspect and package user-selected datasets, upload dataset archives through the BUU route, submit reproduction files, check evaluation results, and manage the current account's own records.
+<h1 align="center">码境实验 Agent Skill</h1>
 
-## What is included
+<p align="center">让 Codex 用自然语言协助你浏览实验、整理数据集、提交复现并查看评测结果。</p>
 
-- `SKILL.md` — when to use the Skill, operating rules, supported workflows, and safety boundaries.
-- `scripts/coderland.py` — Python 3 standard-library helper for credentials, live contract discovery, archive validation, packaging, uploads, and API calls.
+<p align="center">
+  <img alt="Codex Skill" src="https://img.shields.io/badge/Codex-Agent%20Skill-172B4C?style=flat-square">
+  <img alt="适用平台" src="https://img.shields.io/badge/平台-码境实验-378BD2?style=flat-square">
+  <img alt="语言" src="https://img.shields.io/badge/说明-简体中文-56BE83?style=flat-square">
+  <img alt="Python" src="https://img.shields.io/badge/Python-stdlib-3776AB?style=flat-square">
+</p>
 
-The Skill reads the live API contract and upload profiles for current request schemas and limits. If the API reports `410 FEATURE_DISABLED`, stop and wait until the service is available; do not use the website's session-only routes as a workaround.
+## 它能做什么
 
-## Install in Codex
+这个 Skill 为 Codex 提供一套码境实验空间的操作说明，并附带一个仅依赖 Python 标准库的辅助脚本。它会先读取服务端当前 API 合约和数据集规范，再按用户选定的目标执行操作。
 
-Once this public repository is available, paste this prompt into Codex:
+| 场景 | 能力 |
+| --- | --- |
+| 浏览实验空间 | 查看数据集、论文、复现记录和评测信息 |
+| 准备数据集 | 检查目录或 ZIP，按服务端规范验证并打包 |
+| 上传文件 | 通过 BUU 上传通道分块、断点续传 |
+| 提交复现 | 关联数据集与论文，上传结果文件并跟踪评测状态 |
+| 查看结果 | 汇报服务端返回的指标、图片数量、预览和警告 |
+| 管理本人记录 | 按支持的 API 修改本人复现记录的公开状态或删除记录 |
 
-> Install the CoderLand Experiment Skill from `https://github.com/littlezuicat/coderland-experiment-skill/tree/main/coderland-experiment` using the `skill-installer`.
-
-The installer places it in `~/.codex/skills/coderland-experiment`. Restart or refresh Codex's skill discovery after installing. If you use a custom Codex skills directory, follow the installer's destination option.
-
-To install manually, copy the contents of `coderland-experiment/` (including `SKILL.md` and `scripts/`) into a directory named `coderland-experiment` under your Codex skills directory.
-
-## First use
-
-1. Sign in to CoderLand and generate an Experiment API Key in Personal Center → Account Settings.
-2. Run `python3 ~/.codex/skills/coderland-experiment/scripts/coderland.py configure`. Enter the key at the hidden prompt; it will not be echoed.
-3. Run `python3 ~/.codex/skills/coderland-experiment/scripts/coderland.py contract` to fetch the current rules and upload profiles before a task.
-4. Keep the key private. It is stored in the operating-system config directory with restrictive file permissions. Use `forget` to remove the local copy and revoke the key in CoderLand to invalidate it.
-
-## Common commands
-
-```bash
-python3 ~/.codex/skills/coderland-experiment/scripts/coderland.py --help
-python3 ~/.codex/skills/coderland-experiment/scripts/coderland.py contract
-python3 ~/.codex/skills/coderland-experiment/scripts/coderland.py api GET /api/v1/experiments
-python3 ~/.codex/skills/coderland-experiment/scripts/coderland.py inspect --profile paired-restoration --source ./dataset.zip
-python3 ~/.codex/skills/coderland-experiment/scripts/coderland.py package --profile paired-restoration --source ./dataset-folder
-python3 ~/.codex/skills/coderland-experiment/scripts/coderland.py upload-dataset --profile paired-restoration --category 去雾 \
-  --name 示例数据 --description 室外去雾 --test ./coderland-output/dataset-paired-restoration.zip
+```mermaid
+flowchart LR
+    A[描述实验任务] --> B[读取实时 API 合约]
+    B --> C[确认目标与文件]
+    C --> D[验证数据格式]
+    D --> E[通过 BUU 上传]
+    E --> F[提交并跟踪评测]
+    F --> G[汇报服务端结果]
 ```
 
-Generated packages go under the current project's `coderland-output/`. The helper preserves input image and model-weight bytes; profile-permitted archive path normalization is limited to the new ZIP.
+## 支持的数据集格式
 
-## Upload network
+Skill 会读取实时上传规范；下表帮助你快速了解常见结构。实际类别、文件类型和限制以服务端返回为准。
 
-File transfers require the API's BUU network check to report `available: true`. Dataset uploads use short-lived file-scoped tickets and sequential resumable chunks. Reproduction files are streamed through the BUU route. If BUU is unavailable, stop before creating an upload or submitting a record.
+| 类型 | 常见 ZIP 结构 | 关键校验 |
+| --- | --- | --- |
+| 有参考图像复原 | `input/` + `gt/` | 输入与真值按相对路径配对 |
+| 无参考图像复原 | `input/` | 至少包含一张输入图像 |
+| 图像分割 | `input/` + `gt/` | 图像与掩码按文件名对应 |
+| COCO 目标检测 | `input/` + `annotations/instances_*.json` | 校验图片、类别、标注引用 |
+| COCO 人体关键点 | `input/` + `annotations/person_keypoints_*.json` | 校验图片、类别和关键点字段 |
 
-## Safety boundaries
+对 COCO 任务，预测结果按当前接口要求上传 `predictions.json`；官方指标由码境服务端计算。Skill 不会自行编造或替代官方分数。
 
-- Work only with the dataset, paper, and files selected by the user. Never infer a target from filenames or directory contents.
-- Keep API keys, BUU tickets, temporary upload URLs, and credentials out of chat, logs, shell arguments, and public commits.
-- Ask for explicit confirmation immediately before a permanent deletion. Do not delete any data unless asked.
-- Do not invent paper metadata, experiment settings, or evaluation scores.
-- The helper is limited to documented `/api/v1/experiments` member operations. It does not perform admin actions.
+## 在 Codex 中安装
 
-See `SKILL.md` for detailed task routing, data-layout profiles, recovery steps, and failure handling. The live OpenAPI document is the final source for endpoint schemas and current restrictions.
+在 Codex 对话里发送下面这句即可从本公开仓库安装：
+
+> 请使用 `skill-installer`，从 `https://github.com/littlezuicat/coderland-experiment-skill/tree/main/coderland-experiment` 安装码境实验 Skill。
+
+安装后重启或刷新 Codex 的 Skill 发现。安装目录通常是 `~/.codex/skills/coderland-experiment`。你也可以直接打开 [Skill 说明](coderland-experiment/SKILL.md) 查看完整操作规则。
+
+### 手动安装
+
+把 [`coderland-experiment/`](coderland-experiment/) 目录完整复制到 Codex 的 Skill 目录，确保其中保留 `SKILL.md` 和 `scripts/`：
+
+```bash
+mkdir -p ~/.codex/skills/coderland-experiment
+cp -R coderland-experiment/. ~/.codex/skills/coderland-experiment/
+```
+
+## 首次使用
+
+1. 登录码境，在「个人中心 → 账号设置」生成实验 API Key。完整密钥只显示一次。
+2. 在终端运行辅助脚本的 `configure` 命令，并在隐藏输入提示中粘贴密钥；不要把密钥发到对话里。
+3. 运行 `contract` 获取当前 API 规则与上传规范。
+4. 后续可让 Codex 直接处理任务，例如：“检查我选中的数据集 ZIP 是否符合 COCO 目标检测格式。”
+
+Linux/macOS 示例：
+
+```bash
+python3 ~/.codex/skills/coderland-experiment/scripts/coderland.py configure
+python3 ~/.codex/skills/coderland-experiment/scripts/coderland.py contract
+```
+
+密钥保存在系统配置目录的 `coderland/credentials.json` 中，并尽可能限制文件权限。脚本只保存 API Key，不保存账号密码。运行 `forget` 可清除本机保存的密钥；如需使密钥失效，请在码境账号设置中撤销。
+
+## 常用命令
+
+```bash
+SKILL=~/.codex/skills/coderland-experiment/scripts/coderland.py
+
+python3 "$SKILL" --help
+python3 "$SKILL" contract
+python3 "$SKILL" api GET /api/v1/experiments
+python3 "$SKILL" inspect --profile coco-detection --source ./dataset.zip
+python3 "$SKILL" package --profile paired-restoration --source ./dataset-folder
+```
+
+新生成的 ZIP 放在当前项目的 `coderland-output/` 目录。脚本尽量保留图片和权重原始字节；只有实时规范允许时才会调整 ZIP 内的路径，以及 COCO JSON 中相应的 `file_name`。
+
+## 安全与边界
+
+- 只操作用户明确选定的数据集、论文、记录和文件，不按文件名或“最近记录”猜目标。
+- 只处理当前 API Key 所属账号的数据；公开状态仅作用于本人支持的复现记录。
+- API Key、BUU 临时票据、可续传 URL 和研究文件都是私密信息，不应进入公开仓库、命令参数、日志或聊天内容。
+- 删除是永久操作；必须先说明目标和影响，并在删除请求前取得用户明确确认。不会删除数据集。
+- 上传前检查 BUU 通道是否可用。不可用时停止，不绕到浏览器会话接口或公网线路上传。
+- 服务端返回 `410` 或 `FEATURE_DISABLED` 时，表示 API 暂不可用；停止操作，不绕过限制。
+- 只支持文档化的 `/api/v1/experiments` 成员 API，不执行管理操作。
+
+## 仓库内容
+
+```text
+.
+├── README.md
+├── assets/
+│   ├── coderland-logo-dark.svg
+│   └── coderland-logo-light.svg
+└── coderland-experiment/
+    ├── SKILL.md
+    └── scripts/
+        └── coderland.py
+```
+
+## 反馈
+
+如果安装路径、接口规则或数据集格式发生变化，欢迎通过 [GitHub Issues](https://github.com/littlezuicat/coderland-experiment-skill/issues) 提交问题。实际请求参数和限制始终以码境服务端最新 API 合约为准。
