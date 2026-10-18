@@ -88,7 +88,7 @@ def load_credentials() -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
-        raise CoderLandError("尚未配置 API Key。先运行 `python scripts/coderland.py configure`。") from exc
+        raise CoderLandError("尚未配置 API Key。先运行 `python scripts/coderland.py login`。") from exc
     except (OSError, ValueError) as exc:
         raise CoderLandError(f"无法读取凭据文件 {path}: {exc}") from exc
     if not isinstance(data, dict) or not isinstance(data.get("api_key"), str):
@@ -304,13 +304,19 @@ def load_api_key() -> str:
     return str(load_credentials()["api_key"])
 
 
-def command_configure(_args) -> None:
-    api_key = getpass.getpass("粘贴您在码境个人中心生成的 API Key（输入不回显）：").strip()
+def command_login(_args) -> None:
+    print("如果还没有 API Key，请先打开码境账号设置生成：")
+    print("https://code.zuicat.cn/profile/?tab=settings")
+    api_key = getpass.getpass("请在此处粘贴 API Key（输入不回显；不要发到聊天中）：").strip()
     if not re.fullmatch(r"cl_exp_[A-Za-z0-9_-]{32,64}", api_key):
         raise CoderLandError("API Key 格式无效；请在码境个人中心重新复制完整密钥。")
     path = save_credentials({"api_base_url": API_BASE, "api_key": api_key, "created_at": time.strftime("%Y-%m-%d %H:%M:%S")})
     print(f"API Key 已保存到：{path}")
     print("此命令只在本机保存密钥；如需停用，请在码境个人中心撤销。")
+
+
+# Keep the old command as a compatibility alias for existing local instructions.
+command_configure = command_login
 
 
 def command_forget(_args) -> None:
@@ -1279,8 +1285,10 @@ def command_finalize(args) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="码境实验 Agent Skill 内置辅助脚本（Python 标准库）")
     commands = parser.add_subparsers(dest="command", required=True)
-    configure = commands.add_parser("configure", help="保存个人中心生成的 API Key")
-    configure.set_defaults(func=command_configure)
+    login = commands.add_parser("login", help="安全配置码境 API Key（本机隐藏输入）")
+    login.set_defaults(func=command_login)
+    configure = commands.add_parser("configure", help="旧命令兼容别名：保存 API Key")
+    configure.set_defaults(func=command_login)
     forget = commands.add_parser("forget", help="清除本机保存的 API Key")
     forget.set_defaults(func=command_forget)
     contract = commands.add_parser("contract", help="读取服务端最新 API 与上传规则")
