@@ -382,6 +382,68 @@ class DatasetUploadTests(unittest.TestCase):
             self.assertEqual(request.call_args_list[1].args[:2], ("GET", f"{coderland.API_PREFIX}/datasets/{dataset_id}"))
             self.assertIn('"baseline_status": "ready"', output.getvalue())
 
+    def test_upload_dataset_includes_optional_train_archive(self):
+        dataset_id = "dataset-with-train"
+        upload_id = "d" * 32
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output_dir = root / "coderland-output"
+            output_dir.mkdir()
+            test_zip = output_dir / "test.zip"
+            _sample_archive(test_zip, "no-reference-restoration")
+            train_zip = output_dir / "train.zip"
+            with zipfile.ZipFile(train_zip, "w") as archive:
+                archive.writestr("train/readme.txt", "synthetic training archive")
+            profile = {
+                "id": "no-reference-restoration", "categories": ["其他复原任务"],
+                "_limits": {"image_count": 20, "test_archive_unpacked_bytes": 1024 * 1024,
+                            "test_archive_bytes": 1024 * 1024, "train_archive_bytes": 1024 * 1024,
+                            "dataset_name_characters": 18, "dataset_description_characters": 20,
+                            "upload_chunk_bytes": 1024},
+            }
+            output = io.StringIO()
+            with patch.object(Path, "cwd", return_value=root), \
+                    patch.object(coderland, "load_api_key", return_value="synthetic-key"), \
+                    patch.object(coderland, "_profile", return_value=profile), \
+                    patch.object(coderland, "_require_buu") as require_buu, \
+                    patch.object(coderland, "_state_file", return_value=("e" * 32, root / "state.json")), \
+                    patch.object(coderland, "_upload_dataset_file") as upload_file, \
+                    patch.object(coderland, "_request_json", side_effect=[
+                        {"upload_id": upload_id},
+                        {"dataset_id": dataset_id, "baseline_status": "ready"},
+                    ]) as request, \
+                    redirect_stdout(output):
+                coderland.command_upload_dataset(SimpleNamespace(
+                    profile="no-reference-restoration", category="其他复原任务", name="mock-set",
+                    description="synthetic", test=str(test_zip), train=str(train_zip),
+                ))
+
+            require_buu.assert_called_once_with("synthetic-key")
+            self.assertEqual(
+                [call.args[2:4] for call in upload_file.call_args_list],
+                [("test", test_zip.resolve()), ("train", train_zip.resolve())],
+            )
+            upload_payload = request.call_args_list[0].kwargs["body"]
+            self.assertEqual(request.call_args_list[0].args[:2], (
+                "POST", coderland.API_PREFIX + "/datasets/upload-sessions",
+            ))
+            self.assertEqual(upload_payload["test_file"], {
+                "name": test_zip.name, "size": test_zip.stat().st_size,
+            })
+            self.assertEqual(upload_payload["train_file"], {
+                "name": train_zip.name, "size": train_zip.stat().st_size,
+            })
+            completion_payload = request.call_args_list[1].kwargs["body"]
+            self.assertEqual(request.call_args_list[1].args[:2], (
+                "POST", coderland.API_PREFIX + "/datasets/upload-complete",
+            ))
+            self.assertEqual(completion_payload, {
+                "upload_id": upload_id,
+                "metadata": {"category": "其他复原任务", "name": "mock-set", "description": "synthetic"},
+                "test_image_count": 1,
+            })
+            self.assertIn('"dataset_id": "dataset-with-train"', output.getvalue())
+
 
 class UploadFileTests(unittest.TestCase):
     def test_filename_is_query_encoded_and_mapped_to_members_api_route(self):
