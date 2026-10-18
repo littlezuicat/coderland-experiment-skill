@@ -19,10 +19,10 @@
 
 ## 🚀 一句话安装
 
-把这句话发给 Codex，它会从本仓库安装 Skill；如果本机还没有 API Key，会引导你在终端运行一条登录命令。密钥只在本机隐藏输入，不需要发到聊天里：
+把这句话发给 Codex，它会从本仓库安装 Skill。需要登录时，账号设置会生成适用于 Windows CMD 或 Linux/macOS Terminal 的命令；命令包含完整密钥，只在自己的电脑运行，不要发到聊天里：
 
 ```text
-请用 skill-installer 从 https://github.com/littlezuicat/coderland-experiment-skill 安装或更新码境实验 Skill。如果 API Key 尚未配置，请引导我前往码境账号设置生成，并把页面生成的登录命令只粘贴到我自己的 Windows CMD 运行；不要让我把密钥或命令发到聊天里。
+请用 skill-installer 从 https://github.com/littlezuicat/coderland-experiment-skill 安装或更新码境实验 Skill。若登录未配置或已失效，请引导我打开 https://code.zuicat.cn/profile/?tab=settings 生成实验 API Key，并选择适用于我本机的 Windows CMD 或 Linux/macOS Terminal 登录命令。我会只在自己的终端运行；不要索要或读取密钥/命令，也不要让我把它们发到聊天、截图或日志。运行完成后我会回复“登录完成”，再继续操作。
 ```
 
 安装完成后，Codex 可按 Skill 说明处理后续的码境实验任务。
@@ -66,7 +66,7 @@ Skill 会读取实时上传规范；下表帮助你快速了解常见结构。�
 
 ## 在 Codex 中安装
 
-在 Codex 对话里发送上面的「一句话安装」提示词即可。若本机还没有 API Key，运行登录命令后按终端提示打开[码境账号设置](https://code.zuicat.cn/profile/?tab=settings)生成，并在终端隐藏输入；不要把密钥发进聊天。
+在 Codex 对话里发送上面的「一句话安装」提示词即可。若尚未登录，按引导打开[码境账号设置](https://code.zuicat.cn/profile/?tab=settings)，生成密钥并选择与目标电脑匹配的命令，只在本机 Windows CMD 或 Linux/macOS Terminal 运行。命令包含完整密钥；不要把它发进聊天。运行完成后告诉 Codex“登录完成”即可。
 
 安装后重启或刷新 Codex 的 Skill 发现。安装目录通常是 `~/.codex/skills/coderland-experiment`。你也可以直接打开 [Skill 说明](coderland-experiment/SKILL.md) 查看完整操作规则。
 
@@ -81,11 +81,11 @@ cp -R coderland-experiment/. ~/.codex/skills/coderland-experiment/
 
 ## 首次使用
 
-1. 从[个人中心 → 账号设置](https://code.zuicat.cn/profile/?tab=settings)生成 API Key 后，复制页面生成的 CMD 登录命令，并只在本机 CMD 运行。不要把密钥或命令发到对话里。
-3. 运行 `contract` 获取当前 API 规则与上传规范。
-4. 后续可让 Codex 直接处理任务，例如：“检查我选中的数据集 ZIP 是否符合 COCO 目标检测格式。”
+1. 从[个人中心 → 账号设置](https://code.zuicat.cn/profile/?tab=settings)生成 API Key，并选择与目标电脑对应的登录命令格式。
+2. 只在自己的 Windows CMD 或 Linux/macOS Terminal 运行命令。命令含完整密钥，不要发给 Codex、聊天或截图；完成后回复“登录完成”。
+3. Skill 会读取当前 API 规则与上传规范，然后即可让 Codex 处理实验任务，例如：“检查我选中的数据集 ZIP 是否符合 COCO 目标检测格式。”
 
-Linux/macOS 示例：
+如果页面生成的命令不可用，可在 Linux/macOS 本机终端使用隐藏输入登录：
 
 ```bash
 python3 ~/.codex/skills/coderland-experiment/scripts/coderland.py login
