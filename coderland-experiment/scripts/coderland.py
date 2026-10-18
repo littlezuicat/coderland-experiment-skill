@@ -154,7 +154,7 @@ def _request(method: str, path: str, *, base: str | None = None, api_key: str | 
         raise CoderLandError("Skill 只连接固定的码境 API 或 BUU 上传主机。")
     if not path.startswith("/"):
         raise CoderLandError("API 路径必须以 / 开头。")
-    request_headers = {"Accept": "application/json", "User-Agent": "CoderLand-Experiment-Skill/1.2.0"}
+    request_headers = {"Accept": "application/json", "User-Agent": "CoderLand-Experiment-Skill/1.2.1"}
     if api_key:
         request_headers["X-API-Key"] = api_key
     data = raw
@@ -203,7 +203,7 @@ def _request_to_file(method: str, path: str, destination: Path, *, base: str | N
         raise CoderLandError("Skill 只连接固定的码境 API 或 BUU 上传主机。")
     if not path.startswith("/"):
         raise CoderLandError("API 路径必须以 / 开头。")
-    request_headers = {"Accept": "application/json", "User-Agent": "CoderLand-Experiment-Skill/1.2.0"}
+    request_headers = {"Accept": "application/json", "User-Agent": "CoderLand-Experiment-Skill/1.2.1"}
     if api_key:
         request_headers["X-API-Key"] = api_key
     data = None
@@ -274,7 +274,7 @@ def _request_file(method: str, path: str, file_path: Path, *, base: str,
         "Accept": "application/json",
         "Content-Type": content_type,
         "Content-Length": str(file_path.stat().st_size),
-        "User-Agent": "CoderLand-Experiment-Skill/1.2.0",
+        "User-Agent": "CoderLand-Experiment-Skill/1.2.1",
         "X-API-Key": api_key,
     }
     connection = http.client.HTTPSConnection(parsed_base.hostname, parsed_base.port or 443, timeout=timeout)
@@ -322,7 +322,7 @@ def command_login(args) -> None:
     else:
         print("如果还没有 API Key，请先打开码境账号设置：")
         print("https://code.zuicat.cn/profile/?tab=settings")
-        api_key = getpass.getpass("请在此处粘贴 API Key（输入不回显；不要发到聊天中）：").strip()
+        api_key = getpass.getpass("请在此处粘贴 API Key（输入不回显；仅用于本机登录）：").strip()
     if not re.fullmatch(r"cl_exp_[A-Za-z0-9_-]{32,64}", api_key):
         raise CoderLandError("API Key 格式无效；请在码境个人中心重新复制密钥。")
     print("正在向码境验证 API Key…")
@@ -1317,7 +1317,7 @@ def command_finalize(args) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="码境实验 Agent Skill 内置辅助脚本（Python 标准库）")
     commands = parser.add_subparsers(dest="command", required=True)
-    login = commands.add_parser("login", help="安全配置码境 API Key（本机隐藏输入）")
+    login = commands.add_parser("login", help="验证并保存码境 API Key（本机隐藏输入）")
     login.add_argument("--stdin", action="store_true", help="从标准输入读取 Key，供账号设置页生成的 CMD 命令使用")
     login.set_defaults(func=command_login)
     configure = commands.add_parser("configure", help="旧命令兼容别名：保存 API Key")
