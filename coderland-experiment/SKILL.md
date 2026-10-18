@@ -106,10 +106,10 @@ python scripts/coderland.py finalize --staging-id SELECTED_STAGING_ID --dataset-
 
 ## 常见响应处理
 
-每次 API 调用后都检查 HTTP 状态和 JSON 响应。非 2xx 响应统一包含 `ok=false`、`code`、`error`、`solution` 和 `retryable`：把 `error` 当作服务端确认的失败原因，把 `solution` 当作下一步建议，向用户清楚说明两者。不要只复述状态码，不要自行猜测失败原因，也不要丢弃服务端返回的 `solution`。辅助脚本会同时打印原因、错误码、处理建议和重试提示。
+每次 API 调用后都检查 HTTP 状态和 JSON 响应。非 2xx 响应至少包含 `ok=false`、`code`、`error` 和 `reason`：优先把 `reason` 当作服务端确认的失败原因向用户说明；旧版响应缺少 `reason` 时再读 `error`。不要只复述状态码，也不要猜测或编造失败原因。若响应提供 `solution` 或 `retryable`，再按其内容说明和处理；没有处理建议时可以只报告明确原因。辅助脚本会优先打印 `reason`，并附上错误码，以及服务端提供的建议和重试信息。
 
-- 仅当 `retryable=true` 且 `solution` 允许时有限重试。写入、删除或上传操作重试前，先读取相关会话/资源状态，避免重复创建或覆盖。
-- `400`、`401`、`403`、`404`、`409`、`410`、`413` 等请求或状态错误：先按 `error` 和 `solution` 修正；不要原样重试。`401` 需引导用户在[码境账号设置](https://code.zuicat.cn/profile/?tab=settings)检查 Key，用户在本机重新登录前停止 API 操作。`403` 不换账号或猜 ID。`404` 不枚举 ID；finalize 超时后如暂存 ID 返回 404，只按同一 ID 查询所选数据集目录确认完成状态，不得重发 finalize。`410` 或 `FEATURE_DISABLED` 表示接口/会话不可用，停止，不回退到仅限网站会话的接口。
+- 仅当 `retryable=true` 且原因和当前资源状态表明安全时有限重试。写入、删除或上传操作重试前，先读取相关会话/资源状态，避免重复创建或覆盖。
+- `400`、`401`、`403`、`404`、`409`、`410`、`413` 等请求或状态错误：先按 `reason` 修正；没有 `reason` 时才看 `error`，不要原样重试。`401` 需引导用户在[码境账号设置](https://code.zuicat.cn/profile/?tab=settings)检查 Key，用户在本机重新登录前停止 API 操作。`403` 不换账号或猜 ID。`404` 不枚举 ID；finalize 超时后如暂存 ID 返回 404，只按同一 ID 查询所选数据集目录确认完成状态，不得重发 finalize。`410` 或 `FEATURE_DISABLED` 表示接口/会话不可用，停止，不回退到仅限网站会话的接口。
 - `429`：遵守 `Retry-After`，缺少该响应头时按有限递增退避；遵循响应 `solution`。
 - `5xx`：先核对会话或记录，避免重复写入；再按 `solution` 有限重试，持续失败时向用户说明这是服务端/上游错误并提供 `code`。
 - 数据集上传完成响应的 HTTP 200 只代表 ZIP 已登记，不代表数据集可评测。若 `baseline_status=pulling`，继续查询 `GET /datasets/{dataset_id}`；只有 `active=true` 且状态为 `ready` 才可提交评测。若状态为 `failed`，直接读取 `baseline_error.code`、`baseline_error.reason`、`baseline_error.solution`，明确告诉用户失败原因和修复办法。比如 `IMAGE_EXTENSION_MISMATCH` 表示图片实际编码和扩展名不一致；依据真实编码修正后缀，同时保持 `input/` 与 `gt/` 文件名主体对应，再删除失败数据集并重新上传。不要把 `failed` 概括成“API 没有返回原因”，也不要让用户盲目重传原 ZIP。
