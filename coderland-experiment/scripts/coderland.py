@@ -124,6 +124,28 @@ def _json_bytes(data: object) -> bytes:
     return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
+def _http_error_message(detail: object, status: int) -> str:
+    if isinstance(detail, dict):
+        code = str(detail.get("code") or "")
+        message = str(detail.get("error") or f"HTTP {status}")
+        solution = str(detail.get("solution") or "")
+        retryable = detail.get("retryable")
+    else:
+        code = ""
+        message = f"HTTP {status}"
+        solution = ""
+        retryable = None
+    if code == "BUU_NETWORK_REQUIRED":
+        message = "请连接 BUU 后重试；未完成本次文件传输。"
+        solution = solution or "连接 BUU 校园网后重新检查上传通道，再创建新的上传会话。"
+    lines = [f"{message} [{code or status}]"]
+    if solution:
+        lines.append(f"处理建议：{solution}")
+    if isinstance(retryable, bool):
+        lines.append("可重试：是（按处理建议有限重试）" if retryable else "可重试：否（先修复原因或读取当前状态）")
+    return "\n".join(lines)
+
+
 def _request(method: str, path: str, *, base: str | None = None, api_key: str | None = None,
              body: object | None = None, raw: bytes | None = None,
              headers: dict[str, str] | None = None, timeout: int = 120) -> tuple[bytes, dict[str, str]]:
@@ -132,7 +154,7 @@ def _request(method: str, path: str, *, base: str | None = None, api_key: str | 
         raise CoderLandError("Skill 只连接固定的码境 API 或 BUU 上传主机。")
     if not path.startswith("/"):
         raise CoderLandError("API 路径必须以 / 开头。")
-    request_headers = {"Accept": "application/json", "User-Agent": "CoderLand-Experiment-Skill/1.0.0"}
+    request_headers = {"Accept": "application/json", "User-Agent": "CoderLand-Experiment-Skill/1.1.0"}
     if api_key:
         request_headers["X-API-Key"] = api_key
     data = raw
@@ -152,11 +174,7 @@ def _request(method: str, path: str, *, base: str | None = None, api_key: str | 
             detail = json.loads(response_body.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             detail = {"error": response_body[:500].decode("utf-8", "replace") or str(exc)}
-        code = str(detail.get("code") or "") if isinstance(detail, dict) else ""
-        message = str(detail.get("error") or f"HTTP {exc.code}") if isinstance(detail, dict) else f"HTTP {exc.code}"
-        if code == "BUU_NETWORK_REQUIRED":
-            message = "请连接 BUU 后重试；未完成本次文件传输。"
-        raise CoderLandError(f"{message} [{code or exc.code}]") from exc
+        raise CoderLandError(_http_error_message(detail, exc.code)) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise CoderLandError(f"连接码境 API 失败：{exc}") from exc
 
@@ -185,7 +203,7 @@ def _request_to_file(method: str, path: str, destination: Path, *, base: str | N
         raise CoderLandError("Skill 只连接固定的码境 API 或 BUU 上传主机。")
     if not path.startswith("/"):
         raise CoderLandError("API 路径必须以 / 开头。")
-    request_headers = {"Accept": "application/json", "User-Agent": "CoderLand-Experiment-Skill/1.0.0"}
+    request_headers = {"Accept": "application/json", "User-Agent": "CoderLand-Experiment-Skill/1.1.0"}
     if api_key:
         request_headers["X-API-Key"] = api_key
     data = None
@@ -235,11 +253,7 @@ def _request_to_file(method: str, path: str, destination: Path, *, base: str | N
             detail = json.loads(response_body.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             detail = {"error": response_body[:500].decode("utf-8", "replace") or str(exc)}
-        code = str(detail.get("code") or "") if isinstance(detail, dict) else ""
-        message = str(detail.get("error") or f"HTTP {exc.code}") if isinstance(detail, dict) else f"HTTP {exc.code}"
-        if code == "BUU_NETWORK_REQUIRED":
-            message = "请连接 BUU 后重试；未完成本次文件传输。"
-        raise CoderLandError(f"{message} [{code or exc.code}]") from exc
+        raise CoderLandError(_http_error_message(detail, exc.code)) from exc
     except (urllib.error.URLError, TimeoutError, http.client.HTTPException) as exc:
         raise CoderLandError(f"连接码境 API 失败：{exc}") from exc
     except OSError as exc:
@@ -260,7 +274,7 @@ def _request_file(method: str, path: str, file_path: Path, *, base: str,
         "Accept": "application/json",
         "Content-Type": content_type,
         "Content-Length": str(file_path.stat().st_size),
-        "User-Agent": "CoderLand-Experiment-Skill/1.0.0",
+        "User-Agent": "CoderLand-Experiment-Skill/1.1.0",
         "X-API-Key": api_key,
     }
     connection = http.client.HTTPSConnection(parsed_base.hostname, parsed_base.port or 443, timeout=timeout)
@@ -288,11 +302,7 @@ def _request_file(method: str, path: str, file_path: Path, *, base: str,
                 detail = json.loads(response_body.decode("utf-8"))
             except (ValueError, UnicodeDecodeError):
                 detail = {"error": response_body[:500].decode("utf-8", "replace") or f"HTTP {response.status}"}
-            code = str(detail.get("code") or "") if isinstance(detail, dict) else ""
-            message = str(detail.get("error") or f"HTTP {response.status}") if isinstance(detail, dict) else f"HTTP {response.status}"
-            if code == "BUU_NETWORK_REQUIRED":
-                message = "请连接 BUU 后重试；未完成本次文件传输。"
-            raise CoderLandError(f"{message} [{code or response.status}]")
+            raise CoderLandError(_http_error_message(detail, response.status))
         return response_body, response_headers
     except (http.client.HTTPException, TimeoutError, OSError) as exc:
         raise CoderLandError(f"文件上传连接中断：{exc}") from exc
@@ -1023,15 +1033,30 @@ def command_upload_dataset(args) -> None:
     if not dataset_id:
         raise CoderLandError("服务端没有返回数据集 ID，无法确认登记状态。")
     baseline_status = str(result.get("baseline_status") or "unknown")
+    baseline_error = result.get("baseline_error")
     deadline = time.monotonic() + 600
     while baseline_status == "pulling" and time.monotonic() < deadline:
         time.sleep(3)
         current = _request_json("GET", f"{API_PREFIX}/datasets/{urllib.parse.quote(dataset_id, safe='-')}", api_key=api_key)
         dataset = current.get("dataset") or {}
         baseline_status = str(dataset.get("baseline_status") or "unknown")
+        baseline_error = dataset.get("baseline_error")
         print(f"服务端校验数据集：{baseline_status}", flush=True)
     if baseline_status == "failed":
-        raise CoderLandError(f"数据集已登记但服务器基准校验失败；记录 ID：{dataset_id}。请检查 ZIP 后联系管理员处理。")
+        baseline_error = baseline_error if isinstance(baseline_error, dict) else {}
+        code = str(baseline_error.get("code") or "BASELINE_FAILURE_REASON_UNAVAILABLE")
+        reason = str(baseline_error.get("reason") or "服务器未返回具体的基线校验失败原因。")
+        solution = str(baseline_error.get("solution") or "请查询数据集状态；如问题仍存在，联系管理员并提供数据集 ID。")
+        raise CoderLandError(
+            f"数据集已登记，但基线校验失败 [{code}]：{reason}\n"
+            f"处理建议：{solution}\n数据集 ID：{dataset_id}"
+        )
+    if baseline_status == "pulling":
+        raise CoderLandError(
+            f"数据集已登记，基线校验仍在进行中；现在还不能提交评测。\n"
+            f"处理建议：稍后查询 GET {API_PREFIX}/datasets/{urllib.parse.quote(dataset_id, safe='-')}。\n"
+            f"数据集 ID：{dataset_id}"
+        )
     print(json.dumps({"created": True, "test_image_count": count, "baseline_status": baseline_status,
                       "dataset_id": dataset_id, "dataset": result}, ensure_ascii=False, indent=2))
 
