@@ -127,18 +127,18 @@ def _json_bytes(data: object) -> bytes:
 def _http_error_message(detail: object, status: int) -> str:
     if isinstance(detail, dict):
         code = str(detail.get("code") or "")
-        message = str(detail.get("error") or f"HTTP {status}")
+        reason = str(detail.get("reason") or detail.get("error") or f"HTTP {status}")
         solution = str(detail.get("solution") or "")
         retryable = detail.get("retryable")
     else:
         code = ""
-        message = f"HTTP {status}"
+        reason = f"HTTP {status}：服务端未返回具体失败原因。"
         solution = ""
         retryable = None
     if code == "BUU_NETWORK_REQUIRED":
-        message = "请连接 BUU 后重试；未完成本次文件传输。"
+        reason = reason or "当前上传请求未通过 BUU 校园网通道，文件没有传输。"
         solution = solution or "连接 BUU 校园网后重新检查上传通道，再创建新的上传会话。"
-    lines = [f"{message} [{code or status}]"]
+    lines = [f"失败原因：{reason} [{code or status}]"]
     if solution:
         lines.append(f"处理建议：{solution}")
     if isinstance(retryable, bool):
@@ -154,7 +154,7 @@ def _request(method: str, path: str, *, base: str | None = None, api_key: str | 
         raise CoderLandError("Skill 只连接固定的码境 API 或 BUU 上传主机。")
     if not path.startswith("/"):
         raise CoderLandError("API 路径必须以 / 开头。")
-    request_headers = {"Accept": "application/json", "User-Agent": "CoderLand-Experiment-Skill/1.1.0"}
+    request_headers = {"Accept": "application/json", "User-Agent": "CoderLand-Experiment-Skill/1.2.0"}
     if api_key:
         request_headers["X-API-Key"] = api_key
     data = raw
@@ -203,7 +203,7 @@ def _request_to_file(method: str, path: str, destination: Path, *, base: str | N
         raise CoderLandError("Skill 只连接固定的码境 API 或 BUU 上传主机。")
     if not path.startswith("/"):
         raise CoderLandError("API 路径必须以 / 开头。")
-    request_headers = {"Accept": "application/json", "User-Agent": "CoderLand-Experiment-Skill/1.1.0"}
+    request_headers = {"Accept": "application/json", "User-Agent": "CoderLand-Experiment-Skill/1.2.0"}
     if api_key:
         request_headers["X-API-Key"] = api_key
     data = None
@@ -274,7 +274,7 @@ def _request_file(method: str, path: str, file_path: Path, *, base: str,
         "Accept": "application/json",
         "Content-Type": content_type,
         "Content-Length": str(file_path.stat().st_size),
-        "User-Agent": "CoderLand-Experiment-Skill/1.1.0",
+        "User-Agent": "CoderLand-Experiment-Skill/1.2.0",
         "X-API-Key": api_key,
     }
     connection = http.client.HTTPSConnection(parsed_base.hostname, parsed_base.port or 443, timeout=timeout)
