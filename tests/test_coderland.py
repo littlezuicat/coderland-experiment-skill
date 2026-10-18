@@ -496,6 +496,90 @@ class PaperApiTests(unittest.TestCase):
         request.assert_not_called()
 
 
+class FileUploadStreamingTests(unittest.TestCase):
+    class FakeStream:
+        def __init__(self, chunks):
+            self.chunks = list(chunks)
+            self.read_sizes = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, size=-1):
+            self.read_sizes.append(size)
+            if size <= 0:
+                raise AssertionError("upload stream must never request the entire file")
+            return self.chunks.pop(0) if self.chunks else b""
+
+    class FakeResponse:
+        status = 201
+
+        def read(self):
+            return b'{"uploaded":true}'
+
+        def getheaders(self):
+            return [("Content-Type", "application/json")]
+
+    class FakeConnection:
+        def __init__(self):
+            self.request = None
+            self.headers = {}
+            self.sent_chunks = []
+            self.closed = False
+
+        def putrequest(self, method, path, **_kwargs):
+            self.request = (method, path)
+
+        def putheader(self, name, value):
+            self.headers[name.casefold()] = value
+
+        def endheaders(self):
+            self.headers_finished = True
+
+        def send(self, data):
+            self.sent_chunks.append(data)
+
+        def getresponse(self):
+            return FileUploadStreamingTests.FakeResponse()
+
+        def close(self):
+            self.closed = True
+
+    def test_request_file_sends_large_file_in_ordered_bounded_chunks(self):
+        chunk_size = coderland.MAX_CHUNK_BYTES
+        expected_chunks = [b"A" * chunk_size, b"B" * chunk_size, b"C" * 13]
+        total = sum(map(len, expected_chunks))
+        stream = self.FakeStream(expected_chunks)
+        connection = self.FakeConnection()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = Path(temp_dir) / "synthetic-upload.zip"
+            with file_path.open("wb") as output:
+                output.truncate(total)
+            with patch.object(coderland.http.client, "HTTPSConnection", return_value=connection) as connect, \
+                    patch.object(coderland.Path, "open", return_value=stream), \
+                    redirect_stdout(io.StringIO()):
+                response_body, response_headers = coderland._request_file(
+                    "POST", "/api/v1/experiments/papers/selected/pdf", file_path,
+                    base=coderland.API_BASE, api_key="synthetic-key", content_type="application/zip",
+                )
+
+        connect.assert_called_once_with("code.zuicat.cn", 443, timeout=3600)
+        self.assertEqual(connection.request, ("POST", "/api/v1/experiments/papers/selected/pdf"))
+        self.assertEqual(connection.headers["content-length"], str(total))
+        self.assertEqual(connection.headers["content-type"], "application/zip")
+        self.assertEqual(connection.sent_chunks, expected_chunks)
+        self.assertEqual(b"".join(connection.sent_chunks), b"".join(expected_chunks))
+        self.assertEqual(stream.read_sizes, [chunk_size, chunk_size, chunk_size, chunk_size])
+        self.assertTrue(all(0 < size <= chunk_size for size in stream.read_sizes))
+        self.assertEqual(response_body, b'{"uploaded":true}')
+        self.assertEqual(response_headers, {"Content-Type": "application/json"})
+        self.assertTrue(connection.closed)
+
+
 class StreamDownloadTests(unittest.TestCase):
     class FakeResponse:
         def __init__(self, total, headers=None):
