@@ -85,13 +85,14 @@ class ProfileLayoutTests(unittest.TestCase):
 
 
 class CredentialCommandTests(unittest.TestCase):
-    def test_configure_uses_temporary_credential_path_and_hides_key(self):
+    def test_login_validates_key_before_saving_and_hides_it(self):
         api_key = "cl_exp_" + "A" * 32
         with tempfile.TemporaryDirectory() as temp_dir:
             credential_file = Path(temp_dir) / "credentials.json"
             output = io.StringIO()
             with patch.dict(os.environ, {"CODERLAND_CREDENTIALS_FILE": str(credential_file)}), \
                     patch.object(coderland.getpass, "getpass", return_value=api_key) as getpass_call, \
+                    patch.object(coderland, "_request_json", return_value={}) as request_call, \
                     redirect_stdout(output):
                 coderland.command_configure(None)
 
@@ -99,8 +100,23 @@ class CredentialCommandTests(unittest.TestCase):
             self.assertEqual(json.loads(credential_file.read_text(encoding="utf-8"))["api_key"], api_key)
             self.assertNotIn(api_key, output.getvalue())
             getpass_call.assert_called_once()
+            request_call.assert_called_once_with(
+                "GET", coderland.API_PREFIX + "/contract", api_key=api_key, timeout=30,
+            )
             if os.name != "nt":
                 self.assertEqual(stat.S_IMODE(credential_file.stat().st_mode), 0o600)
+
+    def test_login_rejects_invalid_key_without_saving(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            credential_file = Path(temp_dir) / "credentials.json"
+            with patch.dict(os.environ, {"CODERLAND_CREDENTIALS_FILE": str(credential_file)}), \
+                    patch.object(coderland.getpass, "getpass", return_value="not-a-key"), \
+                    patch.object(coderland, "_request_json") as request_call:
+                with self.assertRaises(coderland.CoderLandError):
+                    coderland.command_login(None)
+
+            self.assertFalse(credential_file.exists())
+            request_call.assert_not_called()
 
     def test_forget_removes_only_the_configured_local_credential(self):
         with tempfile.TemporaryDirectory() as temp_dir:
